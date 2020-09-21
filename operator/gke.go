@@ -18,16 +18,17 @@ package operator
 import (
 	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
 	set "github.com/deckarep/golang-set"
 	"github.com/future-architect/gcp-instance-scheduler/model"
 	"github.com/hashicorp/go-multierror"
 	"golang.org/x/net/context"
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/container/v1"
-	"strconv"
-	"strings"
-	"time"
-	"regexp"
 )
 
 type GKENodePoolCall struct {
@@ -230,8 +231,9 @@ func SetLableIfNoLabel(ctx context.Context, projectID, targetLabel string) error
 	}
 	for _, cluster := range filter(clusters.Clusters, targetLabel, "true") {
 		labels := cluster.ResourceLabels
+		fingerprint := cluster.LabelFingerprint
 		for _, nodePool := range cluster.NodePools {
-			nodeSizeLabel := "restore-size-"+nodePool.Name
+			nodeSizeLabel := "restore-size-" + nodePool.Name
 			_, ok := labels[nodeSizeLabel]
 			if !ok {
 				// set new label
@@ -242,7 +244,8 @@ func SetLableIfNoLabel(ctx context.Context, projectID, targetLabel string) error
 		region := parseRegion[len(parseRegion)-1]
 		name := "projects/" + projectID + "/locations/" + region + "/clusters/" + cluster.Name
 		req := &container.SetLabelsRequest{
-			ResourceLabels: labels,
+			ResourceLabels:   labels,
+			LabelFingerprint: fingerprint,
 		}
 		// update labels
 		_, err := container.NewProjectsLocationsClustersService(s).SetResourceLabels(name, req).Do()
@@ -252,7 +255,6 @@ func SetLableIfNoLabel(ctx context.Context, projectID, targetLabel string) error
 	}
 	return nil
 }
-
 
 // GetOriginalNodePoolSize returns map that key=instanceGroupName and value=originalSize
 func GetOriginalNodePoolSize(ctx context.Context, projectID, targetLabel, labelValue string) (map[string]int64, error) {
@@ -320,12 +322,12 @@ func GetCurrentNodeCount(ctx context.Context, projectID, targetLabel string) (ma
 	for _, cluster := range filter(clusters.Clusters, targetLabel, "true") {
 		for _, nodePool := range cluster.NodePools {
 			// nodePool.InstanceGroupUrls's format is below
-			// ["https://www.googleapis.com/compute/v1/projects/<projectID>/zones/<zone1>/instanceGroupManagers/gke-test-scheduler-2-default-pool-2b19b588-grp", 
+			// ["https://www.googleapis.com/compute/v1/projects/<projectID>/zones/<zone1>/instanceGroupManagers/gke-test-scheduler-2-default-pool-2b19b588-grp",
 			//  "https://www.googleapis.com/compute/v1/projects/<projectID>/zones/<zone2>/instanceGroupManagers/gke-test-scheduler-2-default-pool-2b19b588-grp",
 			//  "https://www.googleapis.com/compute/v1/projects/<projectID>/zones/<zone3>/instanceGroupManagers/gke-test-scheduler-2-default-pool-2b19b588-grp"]
 
-			zone := reZone.ReplaceAllString(nodePool.InstanceGroupUrls[0], "")//"<zone1>/instanceGroupManagers/gke-test-scheduler-2-default-pool-2b19b588-grp"
-			zone = reEtc.ReplaceAllString(zone, "")//"<zone1>
+			zone := reZone.ReplaceAllString(nodePool.InstanceGroupUrls[0], "") //"<zone1>/instanceGroupManagers/gke-test-scheduler-2-default-pool-2b19b588-grp"
+			zone = reEtc.ReplaceAllString(zone, "")                            //"<zone1>
 			instanceGroup := reInstance.ReplaceAllString(nodePool.InstanceGroupUrls[0], "")
 			resp, err := computeService.InstanceGroups.Get(projectID, zone, instanceGroup).Context(ctx).Do()
 			if err != nil {
